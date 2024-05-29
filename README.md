@@ -1,5 +1,9 @@
 # dda-voxelizer
 
+[![Test](https://github.com/MIERUNE/dda-voxelizer-rs/actions/workflows/test.yml/badge.svg)](https://github.com/MIERUNE/dda-voxelizer-rs/actions/workflows/test.yml)
+[![codecov](https://codecov.io/gh/MIERUNE/dda-voxelizer-rs/graph/badge.svg?token=thKlQiVjLc)](https://codecov.io/gh/MIERUNE/dda-voxelizer-rs)
+[![Crates.io Version](https://img.shields.io/crates/v/dda-voxelizer)](https://crates.io/crates/dda-voxelizer)
+
 ![1716994116122](image/README/1716994116122.png)
 
 This project is a voxelizer implementation in Rust using the Digital Differential Analyzer (DDA) algorithm. The DDA algorithm was chosen for its simplicity and efficiency in voxelizing 3D models.
