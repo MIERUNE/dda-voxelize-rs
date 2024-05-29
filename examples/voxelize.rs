@@ -10,7 +10,7 @@ use hashbrown::HashMap;
 use indexmap::IndexSet;
 use serde_json::json;
 
-use nusamai_voxelize::{DdaVoxelizer, MeshVoxelizer};
+use dda_voxelize::{DdaVoxelizer, MeshVoxelizer};
 
 fn main() {
     let vertices: Vec<[f64; 3]> = vec![
@@ -77,7 +77,7 @@ fn main() {
 
     let occupied_voxels = voxelizer.finalize();
 
-    // -------------------gltfの作成-------------------
+    // -------------------make glTF-------------------
 
     // voxel is an integer value, but componentType of accessors is 5126 (floating point number),
     // and INTEGER type cannot be used due to primitives constraints
@@ -232,7 +232,7 @@ fn main() {
         ],
     });
 
-    // gltfファイルを出力
+    // write glTF
     println!("write glTF");
     let mut gltf_file = File::create("output.gltf").unwrap();
     let _ = gltf_file.write_all(gltf_json.to_string().as_bytes());
