@@ -1,8 +1,8 @@
-# dda-voxelizer
+# dda-voxelize
 
 [![test](https://github.com/MIERUNE/dda-voxelize-rs/actions/workflows/test.yml/badge.svg)](https://github.com/MIERUNE/dda-voxelize-rs/actions/workflows/test.yml)
 <!-- [![codecov](https://codecov.io/github/MIERUNE/dda-voxelize-rs/graph/badge.svg?token=DZb9Met7wY)](https://codecov.io/github/MIERUNE/dda-voxelize-rs) -->
-[![Crates.io Version](https://img.shields.io/crates/v/dda-voxelizer)](https://crates.io/crates/dda-voxelizer)
+[![Crates.io Version](https://img.shields.io/crates/v/dda-voxelize)](https://crates.io/crates/dda-voxelize)
 
 ![1716994116122](image/README/1716994116122.png)
 
