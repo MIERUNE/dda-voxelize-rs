@@ -1,14 +1,16 @@
 # dda-voxelize
 
 [![test](https://github.com/MIERUNE/dda-voxelize-rs/actions/workflows/test.yml/badge.svg)](https://github.com/MIERUNE/dda-voxelize-rs/actions/workflows/test.yml)
-<!-- [![codecov](https://codecov.io/github/MIERUNE/dda-voxelize-rs/graph/badge.svg?token=DZb9Met7wY)](https://codecov.io/github/MIERUNE/dda-voxelize-rs) -->
 [![Crates.io Version](https://img.shields.io/crates/v/dda-voxelize)](https://crates.io/crates/dda-voxelize)
+<!-- [![codecov](https://codecov.io/github/MIERUNE/dda-voxelize-rs/graph/badge.svg?token=DZb9Met7wY)](https://codecov.io/github/MIERUNE/dda-voxelize-rs) -->
+
+A 3D mesh voxelizer implemented in Rust using the DDA (Digital Differential Analyzer) algorithm. The DDA method is simple and very fast when you only want to voxelize the surfaces of meshes.
 
 ![1716994116122](image/README/1716994116122.png)
 
-This project is a voxelizer implementation in Rust using the Digital Differential Analyzer (DDA) algorithm. The DDA algorithm was chosen for its simplicity and efficiency in voxelizing 3D models.
-
 ## DDA Algorithm Overview
+
+See also: [Digital differential analyzer - Wikipedia](https://en.wikipedia.org/wiki/Digital_differential_analyzer_(graphics_algorithm))
 
 The DDA algorithm is a fast line drawing method commonly used in computer graphics. It incrementally steps along the major axis of the line (X or Y), while computing the corresponding value on the minor axis at each step. This allows lines to be drawn efficiently by only visiting the pixels/voxels that the line actually intersects.
 
