@@ -40,6 +40,8 @@ fn draw_line(voxels: &mut HashMap<VoxelPosition, Voxel>, start: Vec3, end: Vec3)
         color: [255, 255, 255],
     };
 
+    // TODO: We can optimize this since we actually need 2D DDA, not 3D DDA
+
     while current_voxel != last_voxel {
         voxels.insert(current_voxel.to_array(), voxel.clone());
 
