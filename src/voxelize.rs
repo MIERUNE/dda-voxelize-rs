@@ -1,7 +1,7 @@
 use glam::Vec3;
 use hashbrown::HashMap;
 
-#[derive(Eq, PartialEq, Hash, Debug)]
+#[derive(Eq, PartialEq, Hash, Debug, Clone)]
 pub struct Voxel {
     pub color: [u8; 3],
 }
@@ -27,22 +27,42 @@ impl MeshVoxelizer for DdaVoxelizer {
 }
 
 fn draw_line(voxels: &mut HashMap<VoxelPosition, Voxel>, start: Vec3, end: Vec3) {
-    let start = start + Vec3::splat(0.5);
-    let end = end + Vec3::splat(0.5);
-    let direction = end - start;
-    let max_dist = direction.abs().max_element();
-    let steps = max_dist.ceil() as i32;
-    let step_size = direction / steps as f32;
+    let difference = end - start;
+    let last_voxel = (end + Vec3::splat(0.5)).floor().as_ivec3();
 
-    let mut current_voxel = start;
-    for _ in 0..=steps {
-        let position = current_voxel.as_ivec3();
-        let voxel = Voxel {
-            color: [255, 255, 255],
-        };
-        voxels.insert(position.to_array(), voxel);
-        current_voxel += step_size;
+    let mut current_voxel = (start + Vec3::splat(0.5)).floor().as_ivec3();
+    let step = difference.signum().as_ivec3();
+    let next_voxel_boundary = current_voxel.as_vec3() + 0.5 * step.as_vec3();
+    let mut tmax = (next_voxel_boundary - start) / difference;
+    let tdelta = step.as_vec3() / difference;
+
+    let voxel = Voxel {
+        color: [255, 255, 255],
+    };
+
+    // TODO: We can optimize this since we actually need 2D DDA, not 3D DDA
+
+    while current_voxel != last_voxel {
+        voxels.insert(current_voxel.to_array(), voxel.clone());
+
+        if tmax.x < tmax.y {
+            if tmax.x < tmax.z {
+                current_voxel.x += step.x;
+                tmax.x += tdelta.x;
+            } else {
+                current_voxel.z += step.z;
+                tmax.z += tdelta.z;
+            }
+        } else if tmax.y < tmax.z {
+            current_voxel.y += step.y;
+            tmax.y += tdelta.y;
+        } else {
+            current_voxel.z += step.z;
+            tmax.z += tdelta.z;
+        }
     }
+
+    voxels.insert(last_voxel.to_array(), voxel.clone());
 }
 
 fn fill_triangle(voxels: &mut HashMap<VoxelPosition, Voxel>, triangle: &[[f32; 3]; 3]) {
@@ -50,35 +70,26 @@ fn fill_triangle(voxels: &mut HashMap<VoxelPosition, Voxel>, triangle: &[[f32; 3
     let p2 = Vec3::from(triangle[1]);
     let p3 = Vec3::from(triangle[2]);
 
-    // Calculate the lengths of the 3 sides
-    // and if the triangle is small (all sides are less than voxel_size),
-    // do not scan the face and fill one voxel
+    // If the triangle is small enough, fill only the voxels corresponding to the three vertices.
     if is_small_triangle(&p1, &p2, &p3) {
-        println!("Triangles too small!");
-
-        let p1_floor = p1.floor();
-        let p2_floor = p2.floor();
-        let p3_floor = p3.floor();
-
         voxels.insert(
-            [p1_floor.x as i32, p1_floor.y as i32, p1_floor.z as i32],
+            (p1 + Vec3::splat(0.5)).as_ivec3().to_array(),
             Voxel {
                 color: [255, 255, 255],
             },
         );
         voxels.insert(
-            [p2_floor.x as i32, p2_floor.y as i32, p2_floor.z as i32],
+            (p2 + Vec3::splat(0.5)).as_ivec3().to_array(),
             Voxel {
                 color: [255, 255, 255],
             },
         );
         voxels.insert(
-            [p3_floor.x as i32, p3_floor.y as i32, p3_floor.z as i32],
+            (p3 + Vec3::splat(0.5)).as_ivec3().to_array(),
             Voxel {
                 color: [255, 255, 255],
             },
         );
-
         return;
     }
 
@@ -93,7 +104,7 @@ fn fill_triangle(voxels: &mut HashMap<VoxelPosition, Voxel>, triangle: &[[f32; 3
     // yz plane if norm_axis is 0(x)
     // zx plane if norm_axis is 1(y)
     // xy plane if norm_axis is 2(z)
-    let norm_axis = normal
+    let normal_axis = normal
         .abs()
         .to_array()
         .iter()
@@ -110,7 +121,7 @@ fn fill_triangle(voxels: &mut HashMap<VoxelPosition, Voxel>, triangle: &[[f32; 3
     }
     let box_size = max_point - min_point;
 
-    let sweep_axis = match norm_axis {
+    let sweep_axis = match normal_axis {
         0 => {
             if box_size[1] >= box_size[2] {
                 1
@@ -180,7 +191,7 @@ fn fill_triangle(voxels: &mut HashMap<VoxelPosition, Voxel>, triangle: &[[f32; 3
             let mut end_vertex_x = ordered_verts[1][0];
 
             if start_step.length() > 1000.0 || end_step.length() > 1000.0 {
-                println!("Direction vector magnitude is too large");
+                log::debug!("Direction vector magnitude is too large");
                 return;
             }
 
@@ -246,7 +257,7 @@ fn fill_triangle(voxels: &mut HashMap<VoxelPosition, Voxel>, triangle: &[[f32; 3
             let mut end_vertex_y = ordered_verts[1][1];
 
             if start_step.length() > 1000.0 || end_step.length() > 1000.0 {
-                println!("Direction vector magnitude is too large");
+                log::debug!("Direction vector magnitude is too large");
                 return;
             }
 
@@ -312,7 +323,7 @@ fn fill_triangle(voxels: &mut HashMap<VoxelPosition, Voxel>, triangle: &[[f32; 3
             let mut end_vertex_z = ordered_verts[1][2];
 
             if start_step.length() > 1000.0 || end_step.length() > 1000.0 {
-                println!("Direction vector magnitude is too large");
+                log::debug!("Direction vector magnitude is too large");
                 return;
             }
 

@@ -4,9 +4,11 @@
 [![Crates.io Version](https://img.shields.io/crates/v/dda-voxelize)](https://crates.io/crates/dda-voxelize)
 <!-- [![codecov](https://codecov.io/github/MIERUNE/dda-voxelize-rs/graph/badge.svg?token=DZb9Met7wY)](https://codecov.io/github/MIERUNE/dda-voxelize-rs) -->
 
+Work in progress.
+
 A 3D mesh voxelizer implemented in Rust using the DDA (Digital Differential Analyzer) algorithm. The DDA method is simple and very fast when you only want to voxelize the surfaces of meshes.
 
-![1716994116122](image/README/1716994116122.png)
+![1716994116122](docs/demo.png)
 
 ## DDA Algorithm Overview
 
