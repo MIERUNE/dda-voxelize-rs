@@ -2,8 +2,8 @@
 name = "dda-voxelize"
 version = "0.1.0"
 edition = "2021"
-description = "Voxelization in Rust with the DDA Algorithm"
-authors = ["nokonoko1203 <nokonoko.1203.777@gmail.com>", "MIERUNE Inc. <info@mierune.co.jp>"]
+description = "3D mesh voxelization with the DDA algorithm"
+authors = ["nokonoko1203 <nokonoko.1203.777@gmail.com>", "Taku Fukada <naninunenor@gmail.com>", "MIERUNE Inc. <info@mierune.co.jp>"]
 license = "MIT"
 repository = "https://github.com/MIERUNE/dda-voxelize-rs"
 categories = ["algorithms", "graphics", "mathematics", "science::geo"]
