@@ -1,32 +1,73 @@
 use glam::Vec3;
-use hashbrown::HashMap;
-
-#[derive(Eq, PartialEq, Hash, Debug, Clone)]
-pub struct Voxel {
-    pub color: [u8; 3],
-}
+use hashbrown::{hash_map::Entry, HashMap};
 
 pub type VoxelPosition = [i32; 3];
+pub type VertexWeight = [f32; 3];
 
-pub trait MeshVoxelizer {
-    fn add_triangle(&mut self, triangle: &[[f32; 3]; 3]);
-    fn finalize(self) -> HashMap<VoxelPosition, Voxel>;
+pub trait Shader<V>: Fn(Option<&V>, VoxelPosition, VertexWeight) -> V {}
+impl<F, V> Shader<V> for F where F: Fn(Option<&V>, VoxelPosition, VertexWeight) -> V {}
+
+pub struct DdaVoxelizer<V> {
+    buffer: HashMap<VoxelPosition, V>,
 }
 
-pub struct DdaVoxelizer {
-    pub voxels: HashMap<VoxelPosition, Voxel>,
-}
-
-impl MeshVoxelizer for DdaVoxelizer {
-    fn add_triangle(&mut self, triangle: &[[f32; 3]; 3]) {
-        fill_triangle(&mut self.voxels, triangle);
-    }
-    fn finalize(self) -> HashMap<VoxelPosition, Voxel> {
-        self.voxels
+impl<V> DdaVoxelizer<V> {
+    pub fn new() -> Self {
+        Self::default()
     }
 }
 
-fn draw_line(voxels: &mut HashMap<VoxelPosition, Voxel>, start: Vec3, end: Vec3) {
+impl<V> Default for DdaVoxelizer<V> {
+    fn default() -> Self {
+        Self {
+            buffer: HashMap::new(),
+        }
+    }
+}
+
+impl<V: Clone> DdaVoxelizer<V> {
+    pub fn add_triangle(&mut self, triangle: &[[f32; 3]; 3], shader: &impl Shader<V>) {
+        fill_triangle(&mut self.buffer, triangle, &shader);
+    }
+
+    pub fn add_line(&mut self, start: [f32; 3], end: [f32; 3], shader: &impl Shader<V>) {
+        draw_line(
+            &mut self.buffer,
+            Vec3::from_array(start),
+            Vec3::from_array(end),
+            shader,
+        )
+    }
+
+    pub fn finalize(self) -> HashMap<VoxelPosition, V> {
+        self.buffer
+    }
+}
+
+fn put_voxel<V: Clone>(
+    buffer: &mut HashMap<[i32; 3], V>,
+    position: glam::IVec3,
+    shader: impl Shader<V>,
+) {
+    let position = position.to_array();
+    let weight = [1., 0., 0.]; // FIXME: not impletmented yet
+    match buffer.entry(position) {
+        Entry::Occupied(mut v) => {
+            let v = v.get_mut();
+            *v = shader(Some(v), position, weight);
+        }
+        Entry::Vacant(v) => {
+            v.insert(shader(None, position, weight));
+        }
+    }
+}
+
+fn draw_line<V: Clone>(
+    buffer: &mut HashMap<VoxelPosition, V>,
+    start: Vec3,
+    end: Vec3,
+    shader: &impl Shader<V>,
+) {
     let difference = end - start;
     let last_voxel = (end + Vec3::splat(0.5)).floor().as_ivec3();
 
@@ -36,14 +77,10 @@ fn draw_line(voxels: &mut HashMap<VoxelPosition, Voxel>, start: Vec3, end: Vec3)
     let mut tmax = (next_voxel_boundary - start) / difference;
     let tdelta = step.as_vec3() / difference;
 
-    let voxel = Voxel {
-        color: [255, 255, 255],
-    };
-
     // TODO: We can optimize this since we actually need 2D DDA, not 3D DDA
 
     while current_voxel != last_voxel {
-        voxels.insert(current_voxel.to_array(), voxel.clone());
+        put_voxel(buffer, current_voxel, shader);
 
         if tmax.x < tmax.y {
             if tmax.x < tmax.z {
@@ -62,34 +99,23 @@ fn draw_line(voxels: &mut HashMap<VoxelPosition, Voxel>, start: Vec3, end: Vec3)
         }
     }
 
-    voxels.insert(last_voxel.to_array(), voxel.clone());
+    put_voxel(buffer, current_voxel, shader);
 }
 
-fn fill_triangle(voxels: &mut HashMap<VoxelPosition, Voxel>, triangle: &[[f32; 3]; 3]) {
+fn fill_triangle<V: Clone>(
+    voxels: &mut HashMap<VoxelPosition, V>,
+    triangle: &[[f32; 3]; 3],
+    shader: &impl Shader<V>,
+) {
     let p1 = Vec3::from(triangle[0]);
     let p2 = Vec3::from(triangle[1]);
     let p3 = Vec3::from(triangle[2]);
 
     // If the triangle is small enough, fill only the voxels corresponding to the three vertices.
     if is_small_triangle(&p1, &p2, &p3) {
-        voxels.insert(
-            (p1 + Vec3::splat(0.5)).as_ivec3().to_array(),
-            Voxel {
-                color: [255, 255, 255],
-            },
-        );
-        voxels.insert(
-            (p2 + Vec3::splat(0.5)).as_ivec3().to_array(),
-            Voxel {
-                color: [255, 255, 255],
-            },
-        );
-        voxels.insert(
-            (p3 + Vec3::splat(0.5)).as_ivec3().to_array(),
-            Voxel {
-                color: [255, 255, 255],
-            },
-        );
+        put_voxel(voxels, (p1 + Vec3::splat(0.5)).as_ivec3(), shader);
+        put_voxel(voxels, (p2 + Vec3::splat(0.5)).as_ivec3(), shader);
+        put_voxel(voxels, (p3 + Vec3::splat(0.5)).as_ivec3(), shader);
         return;
     }
 
@@ -136,215 +162,82 @@ fn fill_triangle(voxels: &mut HashMap<VoxelPosition, Voxel>, triangle: &[[f32; 3
                 0
             }
         }
-        _ => {
+        2 => {
             if box_size[0] >= box_size[1] {
                 0
             } else {
                 1
             }
         }
+        _ => unreachable!(),
     };
 
     // Draw a virtual grid along the x-axis and find the intersection of the target triangle and the edge
     // Paint from the intersection with smaller x to the intersection with larger x
-    match sweep_axis {
-        // sweep x
-        0 => {
-            let mut ordered_verts = [triangle[0], triangle[1], triangle[2]];
-            if ordered_verts[0][0] > ordered_verts[1][0] {
-                ordered_verts.swap(0, 1);
+    let mut ordered_verts = [triangle[0], triangle[1], triangle[2]];
+    if ordered_verts[0][sweep_axis] > ordered_verts[1][sweep_axis] {
+        ordered_verts.swap(0, 1);
+    }
+    if ordered_verts[1][sweep_axis] > ordered_verts[2][sweep_axis] {
+        ordered_verts.swap(1, 2);
+    }
+    if ordered_verts[0][sweep_axis] > ordered_verts[1][sweep_axis] {
+        ordered_verts.swap(0, 1);
+    }
+    debug_assert!(ordered_verts[1][sweep_axis] >= ordered_verts[0][sweep_axis]);
+
+    let ordered_verts: [[f32; 3]; 3] = ordered_verts.map(|inner| inner.map(|x| x));
+
+    let [mut start_step, mut start_pos] =
+        if (ordered_verts[1][sweep_axis] - ordered_verts[0][sweep_axis]).abs() >= 0.0
+            && (ordered_verts[1][sweep_axis] - ordered_verts[0][sweep_axis].floor() >= 1.0)
+        {
+            let start_step = (Vec3::from(ordered_verts[1]) - Vec3::from(ordered_verts[0]))
+                / (ordered_verts[1][sweep_axis] - ordered_verts[0][sweep_axis]);
+            let start_pos = Vec3::from(ordered_verts[0])
+                + start_step
+                    * ((1.0 - ordered_verts[0][sweep_axis] + ordered_verts[0][sweep_axis].floor())
+                        % 1.0);
+            [start_step, start_pos]
+        } else {
+            let start_step = (Vec3::from(ordered_verts[2]) - Vec3::from(ordered_verts[1]))
+                / (ordered_verts[2][sweep_axis] - ordered_verts[1][sweep_axis]);
+            let start_pos = Vec3::from(ordered_verts[1])
+                + start_step
+                    * ((1.0 - ordered_verts[1][sweep_axis] + ordered_verts[1][sweep_axis].floor())
+                        % 1.0);
+            [start_step, start_pos]
+        };
+
+    let end_step = (Vec3::from(ordered_verts[2]) - Vec3::from(ordered_verts[0]))
+        / (ordered_verts[2][sweep_axis] - ordered_verts[0][sweep_axis]);
+    let mut end_pos = Vec3::from(ordered_verts[0])
+        + end_step
+            * ((1.0 - ordered_verts[0][sweep_axis] + ordered_verts[0][sweep_axis].floor()) % 1.0);
+
+    let mut end_vertex_y = ordered_verts[1][sweep_axis];
+
+    if start_step.length() > 1000.0 || end_step.length() > 1000.0 {
+        log::debug!("Direction vector magnitude is too large");
+        return;
+    }
+
+    while end_pos[sweep_axis] <= ordered_verts[2][sweep_axis] {
+        draw_line(voxels, start_pos, end_pos, shader);
+
+        start_pos += start_step;
+        end_pos += end_step;
+
+        if start_pos[sweep_axis] >= end_vertex_y {
+            end_vertex_y = start_pos[sweep_axis] - ordered_verts[1][sweep_axis];
+            start_pos -= start_step * end_vertex_y;
+            if (ordered_verts[2][sweep_axis] - ordered_verts[1][sweep_axis]).abs() == 0.0 {
+                continue;
             }
-            if ordered_verts[1][0] > ordered_verts[2][0] {
-                ordered_verts.swap(1, 2);
-            }
-            if ordered_verts[0][0] > ordered_verts[1][0] {
-                ordered_verts.swap(0, 1);
-            }
-            debug_assert!(ordered_verts[1][0] >= ordered_verts[0][0]);
-
-            let ordered_verts: [[f32; 3]; 3] = ordered_verts.map(|inner| inner.map(|x| x));
-
-            let mut start_step;
-            let mut start_pos;
-
-            if (ordered_verts[1][0] - ordered_verts[0][0]).abs() >= 0.0
-                && (ordered_verts[1][0] - ordered_verts[0][0].floor() >= 1.0)
-            {
-                start_step = (Vec3::from(ordered_verts[1]) - Vec3::from(ordered_verts[0]))
-                    / (ordered_verts[1][0] - ordered_verts[0][0]);
-                start_pos = Vec3::from(ordered_verts[0])
-                    + start_step
-                        * ((1.0 - ordered_verts[0][0] + ordered_verts[0][0].floor()) % 1.0);
-            } else {
-                start_step = (Vec3::from(ordered_verts[2]) - Vec3::from(ordered_verts[1]))
-                    / (ordered_verts[2][0] - ordered_verts[1][0]);
-                start_pos = Vec3::from(ordered_verts[1])
-                    + start_step
-                        * ((1.0 - ordered_verts[1][0] + ordered_verts[1][0].floor()) % 1.0);
-            };
-
-            let end_step = (Vec3::from(ordered_verts[2]) - Vec3::from(ordered_verts[0]))
-                / (ordered_verts[2][0] - ordered_verts[0][0]);
-            let mut end_pos = Vec3::from(ordered_verts[0])
-                + end_step * ((1.0 - ordered_verts[0][0] + ordered_verts[0][0].floor()) % 1.0);
-
-            let mut end_vertex_x = ordered_verts[1][0];
-
-            if start_step.length() > 1000.0 || end_step.length() > 1000.0 {
-                log::debug!("Direction vector magnitude is too large");
-                return;
-            }
-
-            while end_pos[0] <= ordered_verts[2][0] {
-                draw_line(voxels, start_pos, end_pos);
-
-                start_pos += start_step;
-                end_pos += end_step;
-
-                if start_pos[0] >= end_vertex_x {
-                    end_vertex_x = start_pos[0] - ordered_verts[1][0];
-                    start_pos -= start_step * end_vertex_x;
-                    if (ordered_verts[2][0] - ordered_verts[1][0]).abs() == 0.0 {
-                        continue;
-                    }
-                    start_step = (Vec3::from(ordered_verts[2]) - Vec3::from(ordered_verts[1]))
-                        / (ordered_verts[2][0] - ordered_verts[1][0]);
-                    start_pos += start_step * end_vertex_x;
-                    end_vertex_x = ordered_verts[2][0];
-                }
-            }
-        }
-        // sweep y
-        1 => {
-            let mut ordered_verts = [triangle[0], triangle[1], triangle[2]];
-            if ordered_verts[0][1] > ordered_verts[1][1] {
-                ordered_verts.swap(0, 1);
-            }
-            if ordered_verts[1][1] > ordered_verts[2][1] {
-                ordered_verts.swap(1, 2);
-            }
-            if ordered_verts[0][1] > ordered_verts[1][1] {
-                ordered_verts.swap(0, 1);
-            }
-            debug_assert!(ordered_verts[1][1] >= ordered_verts[0][1]);
-
-            let ordered_verts: [[f32; 3]; 3] = ordered_verts.map(|inner| inner.map(|x| x));
-
-            let mut start_step;
-            let mut start_pos;
-
-            if (ordered_verts[1][1] - ordered_verts[0][1]).abs() >= 0.0
-                && (ordered_verts[1][1] - ordered_verts[0][1].floor() >= 1.0)
-            {
-                start_step = (Vec3::from(ordered_verts[1]) - Vec3::from(ordered_verts[0]))
-                    / (ordered_verts[1][1] - ordered_verts[0][1]);
-                start_pos = Vec3::from(ordered_verts[0])
-                    + start_step
-                        * ((1.0 - ordered_verts[0][1] + ordered_verts[0][1].floor()) % 1.0);
-            } else {
-                start_step = (Vec3::from(ordered_verts[2]) - Vec3::from(ordered_verts[1]))
-                    / (ordered_verts[2][1] - ordered_verts[1][1]);
-                start_pos = Vec3::from(ordered_verts[1])
-                    + start_step
-                        * ((1.0 - ordered_verts[1][1] + ordered_verts[1][1].floor()) % 1.0);
-            };
-
-            let end_step = (Vec3::from(ordered_verts[2]) - Vec3::from(ordered_verts[0]))
-                / (ordered_verts[2][1] - ordered_verts[0][1]);
-            let mut end_pos = Vec3::from(ordered_verts[0])
-                + end_step * ((1.0 - ordered_verts[0][1] + ordered_verts[0][1].floor()) % 1.0);
-
-            let mut end_vertex_y = ordered_verts[1][1];
-
-            if start_step.length() > 1000.0 || end_step.length() > 1000.0 {
-                log::debug!("Direction vector magnitude is too large");
-                return;
-            }
-
-            while end_pos[1] <= ordered_verts[2][1] {
-                draw_line(voxels, start_pos, end_pos);
-
-                start_pos += start_step;
-                end_pos += end_step;
-
-                if start_pos[1] >= end_vertex_y {
-                    end_vertex_y = start_pos[1] - ordered_verts[1][1];
-                    start_pos -= start_step * end_vertex_y;
-                    if (ordered_verts[2][1] - ordered_verts[1][1]).abs() == 0.0 {
-                        continue;
-                    }
-                    start_step = (Vec3::from(ordered_verts[2]) - Vec3::from(ordered_verts[1]))
-                        / (ordered_verts[2][1] - ordered_verts[1][1]);
-                    start_pos += start_step * end_vertex_y;
-                    end_vertex_y = ordered_verts[2][1];
-                }
-            }
-        }
-        // sweep z
-        _ => {
-            let mut ordered_verts = [triangle[0], triangle[1], triangle[2]];
-            if ordered_verts[0][2] > ordered_verts[1][2] {
-                ordered_verts.swap(0, 1);
-            }
-            if ordered_verts[1][2] > ordered_verts[2][2] {
-                ordered_verts.swap(1, 2);
-            }
-            if ordered_verts[0][2] > ordered_verts[1][2] {
-                ordered_verts.swap(0, 1);
-            }
-            debug_assert!(ordered_verts[1][2] >= ordered_verts[0][2]);
-
-            let ordered_verts: [[f32; 3]; 3] = ordered_verts.map(|inner| inner.map(|x| x));
-
-            let mut start_step;
-            let mut start_pos;
-
-            if (ordered_verts[1][2] - ordered_verts[0][2]).abs() >= 0.0
-                && (ordered_verts[1][2] - ordered_verts[0][2].floor() >= 1.0)
-            {
-                start_step = (Vec3::from(ordered_verts[1]) - Vec3::from(ordered_verts[0]))
-                    / (ordered_verts[1][2] - ordered_verts[0][2]);
-                start_pos = Vec3::from(ordered_verts[0])
-                    + start_step
-                        * ((1.0 - ordered_verts[0][2] + ordered_verts[0][2].floor()) % 1.0);
-            } else {
-                start_step = (Vec3::from(ordered_verts[2]) - Vec3::from(ordered_verts[1]))
-                    / (ordered_verts[2][2] - ordered_verts[1][2]);
-                start_pos = Vec3::from(ordered_verts[1])
-                    + start_step
-                        * ((1.0 - ordered_verts[1][2] + ordered_verts[1][2].floor()) % 1.0);
-            };
-
-            let end_step = (Vec3::from(ordered_verts[2]) - Vec3::from(ordered_verts[0]))
-                / (ordered_verts[2][2] - ordered_verts[0][2]);
-            let mut end_pos = Vec3::from(ordered_verts[0])
-                + end_step * ((1.0 - ordered_verts[0][2] + ordered_verts[0][2].floor()) % 1.0);
-
-            let mut end_vertex_z = ordered_verts[1][2];
-
-            if start_step.length() > 1000.0 || end_step.length() > 1000.0 {
-                log::debug!("Direction vector magnitude is too large");
-                return;
-            }
-
-            while end_pos[2] <= ordered_verts[2][2] {
-                draw_line(voxels, start_pos, end_pos);
-
-                start_pos += start_step;
-                end_pos += end_step;
-
-                if start_pos[2] >= end_vertex_z {
-                    end_vertex_z = start_pos[2] - ordered_verts[1][2];
-                    start_pos -= start_step * end_vertex_z;
-                    if (ordered_verts[2][2] - ordered_verts[1][2]).abs() == 0.0 {
-                        continue;
-                    }
-                    start_step = (Vec3::from(ordered_verts[2]) - Vec3::from(ordered_verts[1]))
-                        / (ordered_verts[2][2] - ordered_verts[1][2]);
-                    start_pos += start_step * end_vertex_z;
-                    end_vertex_z = ordered_verts[2][2];
-                }
-            }
+            start_step = (Vec3::from(ordered_verts[2]) - Vec3::from(ordered_verts[1]))
+                / (ordered_verts[2][sweep_axis] - ordered_verts[1][sweep_axis]);
+            start_pos += start_step * end_vertex_y;
+            end_vertex_y = ordered_verts[2][sweep_axis];
         }
     }
 }
@@ -382,7 +275,7 @@ mod tests {
         let mut index_buf: Vec<u32> = Vec::new();
 
         let mut voxelizer = DdaVoxelizer {
-            voxels: HashMap::new(),
+            buffer: HashMap::new(),
         };
 
         for idx_poly in mpoly.iter() {
@@ -402,23 +295,21 @@ mod tests {
             if project3d_to_2d(&buf3d, num_outer, &mut buf2d) {
                 earcutter.earcut(buf2d.iter().cloned(), poly.hole_indices(), &mut index_buf);
                 for indx in index_buf.chunks_exact(3) {
-                    voxelizer.add_triangle(&[
-                        buf3d[indx[0] as usize],
-                        buf3d[indx[1] as usize],
-                        buf3d[indx[2] as usize],
-                    ]);
+                    voxelizer.add_triangle(
+                        &[
+                            buf3d[indx[0] as usize],
+                            buf3d[indx[1] as usize],
+                            buf3d[indx[2] as usize],
+                        ],
+                        &|_, _, _| true,
+                    );
                 }
             }
         }
 
         let occupied_voxels = voxelizer.finalize();
-        let mut test_voxels: HashMap<VoxelPosition, Voxel> = HashMap::new();
-        test_voxels.insert(
-            [0, 0, 0],
-            Voxel {
-                color: [255, 255, 255],
-            },
-        );
+        let mut test_voxels: HashMap<VoxelPosition, bool> = HashMap::new();
+        test_voxels.insert([0, 0, 0], true);
 
         assert_eq!(occupied_voxels, test_voxels);
     }
@@ -442,7 +333,7 @@ mod tests {
         let mut index_buf: Vec<u32> = Vec::new();
 
         let mut voxelizer = DdaVoxelizer {
-            voxels: HashMap::new(),
+            buffer: HashMap::new(),
         };
         for idx_poly in mpoly.iter() {
             let poly = idx_poly.transform(|idx| vertices[*idx as usize]);
@@ -461,42 +352,25 @@ mod tests {
             if project3d_to_2d(&buf3d, num_outer, &mut buf2d) {
                 earcutter.earcut(buf2d.iter().cloned(), poly.hole_indices(), &mut index_buf);
                 for indx in index_buf.chunks_exact(3) {
-                    voxelizer.add_triangle(&[
-                        buf3d[indx[0] as usize],
-                        buf3d[indx[1] as usize],
-                        buf3d[indx[2] as usize],
-                    ]);
+                    voxelizer.add_triangle(
+                        &[
+                            buf3d[indx[0] as usize],
+                            buf3d[indx[1] as usize],
+                            buf3d[indx[2] as usize],
+                        ],
+                        &|_, _, _| true,
+                    );
                 }
             }
         }
 
         let occupied_voxels = voxelizer.finalize();
 
-        let mut test_voxels: HashMap<VoxelPosition, Voxel> = HashMap::new();
-        test_voxels.insert(
-            [0, 0, 0],
-            Voxel {
-                color: [255, 255, 255],
-            },
-        );
-        test_voxels.insert(
-            [1, 0, 0],
-            Voxel {
-                color: [255, 255, 255],
-            },
-        );
-        test_voxels.insert(
-            [0, 1, 0],
-            Voxel {
-                color: [255, 255, 255],
-            },
-        );
-        test_voxels.insert(
-            [1, 1, 0],
-            Voxel {
-                color: [255, 255, 255],
-            },
-        );
+        let mut test_voxels: HashMap<VoxelPosition, bool> = HashMap::new();
+        test_voxels.insert([0, 0, 0], true);
+        test_voxels.insert([1, 0, 0], true);
+        test_voxels.insert([0, 1, 0], true);
+        test_voxels.insert([1, 1, 0], true);
 
         assert_eq!(occupied_voxels, test_voxels);
     }
@@ -525,7 +399,7 @@ mod tests {
         let mut index_buf: Vec<u32> = Vec::new();
 
         let mut voxelizer = DdaVoxelizer {
-            voxels: HashMap::new(),
+            buffer: HashMap::new(),
         };
 
         for idx_poly in mpoly.iter() {
@@ -545,114 +419,41 @@ mod tests {
             if project3d_to_2d(&buf3d, num_outer, &mut buf2d) {
                 earcutter.earcut(buf2d.iter().cloned(), poly.hole_indices(), &mut index_buf);
                 for indx in index_buf.chunks_exact(3) {
-                    voxelizer.add_triangle(&[
-                        buf3d[indx[0] as usize],
-                        buf3d[indx[1] as usize],
-                        buf3d[indx[2] as usize],
-                    ]);
+                    voxelizer.add_triangle(
+                        &[
+                            buf3d[indx[0] as usize],
+                            buf3d[indx[1] as usize],
+                            buf3d[indx[2] as usize],
+                        ],
+                        &|_, _, _| true,
+                    );
                 }
             }
         }
 
         let occupied_voxels = voxelizer.finalize();
 
-        let mut test_voxels: HashMap<VoxelPosition, Voxel> = HashMap::new();
-        test_voxels.insert(
+        let mut test_voxels: HashMap<VoxelPosition, bool> = HashMap::new();
+        for p in [
             [0, 0, 0],
-            Voxel {
-                color: [255, 255, 255],
-            },
-        );
-        test_voxels.insert(
             [1, 0, 0],
-            Voxel {
-                color: [255, 255, 255],
-            },
-        );
-        test_voxels.insert(
             [2, 0, 0],
-            Voxel {
-                color: [255, 255, 255],
-            },
-        );
-        test_voxels.insert(
             [3, 0, 0],
-            Voxel {
-                color: [255, 255, 255],
-            },
-        );
-        test_voxels.insert(
             [0, 1, 0],
-            Voxel {
-                color: [255, 255, 255],
-            },
-        );
-        test_voxels.insert(
             [1, 1, 0],
-            Voxel {
-                color: [255, 255, 255],
-            },
-        );
-        test_voxels.insert(
             [2, 1, 0],
-            Voxel {
-                color: [255, 255, 255],
-            },
-        );
-        test_voxels.insert(
             [3, 1, 0],
-            Voxel {
-                color: [255, 255, 255],
-            },
-        );
-        test_voxels.insert(
             [0, 2, 0],
-            Voxel {
-                color: [255, 255, 255],
-            },
-        );
-        test_voxels.insert(
             [1, 2, 0],
-            Voxel {
-                color: [255, 255, 255],
-            },
-        );
-        test_voxels.insert(
             [2, 2, 0],
-            Voxel {
-                color: [255, 255, 255],
-            },
-        );
-        test_voxels.insert(
             [3, 2, 0],
-            Voxel {
-                color: [255, 255, 255],
-            },
-        );
-        test_voxels.insert(
             [0, 3, 0],
-            Voxel {
-                color: [255, 255, 255],
-            },
-        );
-        test_voxels.insert(
             [1, 3, 0],
-            Voxel {
-                color: [255, 255, 255],
-            },
-        );
-        test_voxels.insert(
             [2, 3, 0],
-            Voxel {
-                color: [255, 255, 255],
-            },
-        );
-        test_voxels.insert(
             [3, 3, 0],
-            Voxel {
-                color: [255, 255, 255],
-            },
-        );
+        ] {
+            test_voxels.insert(p, true);
+        }
 
         assert_eq!(occupied_voxels, test_voxels);
     }
@@ -704,7 +505,7 @@ mod tests {
         let mut index_buf: Vec<u32> = Vec::new();
 
         let mut voxelizer = DdaVoxelizer {
-            voxels: HashMap::new(),
+            buffer: HashMap::new(),
         };
 
         for idx_poly in mpoly.iter() {
@@ -724,11 +525,14 @@ mod tests {
             if project3d_to_2d(&buf3d, num_outer, &mut buf2d) {
                 earcutter.earcut(buf2d.iter().cloned(), poly.hole_indices(), &mut index_buf);
                 for indx in index_buf.chunks_exact(3) {
-                    voxelizer.add_triangle(&[
-                        buf3d[indx[0] as usize],
-                        buf3d[indx[1] as usize],
-                        buf3d[indx[2] as usize],
-                    ]);
+                    voxelizer.add_triangle(
+                        &[
+                            buf3d[indx[0] as usize],
+                            buf3d[indx[1] as usize],
+                            buf3d[indx[2] as usize],
+                        ],
+                        &|_, _, _| true,
+                    );
                 }
             }
         }

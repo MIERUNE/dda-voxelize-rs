@@ -6,19 +6,19 @@ use std::{
 use byteorder::{LittleEndian, WriteBytesExt};
 use earcut::{utils3d::project3d_to_2d, Earcut};
 use flatgeom::MultiPolygon;
-use hashbrown::HashMap;
 use indexmap::IndexSet;
+use palette::FromColor;
 use serde_json::json;
 
-use dda_voxelize::{DdaVoxelizer, MeshVoxelizer};
+use dda_voxelize::DdaVoxelizer;
 
 fn main() {
     let vertices: Vec<[f64; 3]> = vec![
         // exterior
-        [21.5, 0.5, 0.5],
-        [0.5, 0.5, 21.5],
-        [-20.5, 0.5, 0.5],
-        [0.5, 0.5, -20.5],
+        [26.5, 0.5, 0.5],
+        [0.5, 0.5, 26.5],
+        [-25.5, 0.5, 0.5],
+        [0.5, 0.5, -25.5],
         [0.5, 45.5, 0.5],
         [0.5, -44.5, 0.5],
     ];
@@ -42,9 +42,7 @@ fn main() {
     let mut buf2d: Vec<[f32; 2]> = Vec::new();
     let mut index_buf: Vec<u32> = Vec::new();
 
-    let mut voxelizer = DdaVoxelizer {
-        voxels: HashMap::new(),
-    };
+    let mut voxelizer = DdaVoxelizer::new();
 
     for idx_poly in mpoly.iter() {
         let poly = idx_poly.transform(|idx| vertices[*idx as usize]);
@@ -65,11 +63,20 @@ fn main() {
                 // earcut
                 earcutter.earcut(buf2d.iter().cloned(), poly.hole_indices(), &mut index_buf);
                 for indx in index_buf.chunks_exact(3) {
-                    voxelizer.add_triangle(&[
-                        buf3d[indx[0] as usize],
-                        buf3d[indx[1] as usize],
-                        buf3d[indx[2] as usize],
-                    ]);
+                    voxelizer.add_triangle(
+                        &[
+                            buf3d[indx[0] as usize],
+                            buf3d[indx[1] as usize],
+                            buf3d[indx[2] as usize],
+                        ],
+                        &|_current_value, [x, y, z], _vertex_weight| {
+                            let [x, y, z] = [x as f32, y as f32, z as f32];
+                            let color_lab =
+                                palette::Okhsl::new(x.atan2(z).to_degrees(), 1.0, y / 90. + 0.5);
+                            let color_srgb = palette::Srgb::from_color(color_lab);
+                            [color_srgb.red, color_srgb.green, color_srgb.blue]
+                        },
+                    );
                 }
             }
         }
@@ -82,52 +89,79 @@ fn main() {
     // voxel is an integer value, but componentType of accessors is 5126 (floating point number),
     // and INTEGER type cannot be used due to primitives constraints
 
-    let mut positions = IndexSet::new();
     let mut indices = Vec::new();
+    let mut vertices = IndexSet::new(); // [x, y, z, r, g, b]
 
-    for (position, _) in occupied_voxels.iter() {
+    for (position, voxel) in occupied_voxels.iter() {
         let [x, y, z] = [position[0] as f32, position[1] as f32, position[2] as f32];
+        let [r, g, b] = voxel;
+
+        let [r_bits, g_bits, b_bits] = [r.to_bits(), g.to_bits(), b.to_bits()];
 
         // Make a voxel cube
-        let (idx0, _) = positions.insert_full([
+        let (idx0, _) = vertices.insert_full([
             (x + 0.5).to_bits(),
             (y - 0.5).to_bits(),
             (z + 0.5).to_bits(),
+            r_bits,
+            g_bits,
+            b_bits,
         ]);
-        let (idx1, _) = positions.insert_full([
+        let (idx1, _) = vertices.insert_full([
             (x - 0.5).to_bits(),
             (y - 0.5).to_bits(),
             (z + 0.5).to_bits(),
+            r_bits,
+            g_bits,
+            b_bits,
         ]);
-        let (idx2, _) = positions.insert_full([
+        let (idx2, _) = vertices.insert_full([
             (x + 0.5).to_bits(),
             (y - 0.5).to_bits(),
             (z - 0.5).to_bits(),
+            r_bits,
+            g_bits,
+            b_bits,
         ]);
-        let (idx3, _) = positions.insert_full([
+        let (idx3, _) = vertices.insert_full([
             (x - 0.5).to_bits(),
             (y - 0.5).to_bits(),
             (z - 0.5).to_bits(),
+            r_bits,
+            g_bits,
+            b_bits,
         ]);
-        let (idx4, _) = positions.insert_full([
+        let (idx4, _) = vertices.insert_full([
             (x + 0.5).to_bits(),
             (y + 0.5).to_bits(),
             (z + 0.5).to_bits(),
+            r_bits,
+            g_bits,
+            b_bits,
         ]);
-        let (idx5, _) = positions.insert_full([
+        let (idx5, _) = vertices.insert_full([
             (x - 0.5).to_bits(),
             (y + 0.5).to_bits(),
             (z + 0.5).to_bits(),
+            r_bits,
+            g_bits,
+            b_bits,
         ]);
-        let (idx6, _) = positions.insert_full([
+        let (idx6, _) = vertices.insert_full([
             (x + 0.5).to_bits(),
             (y + 0.5).to_bits(),
             (z - 0.5).to_bits(),
+            r_bits,
+            g_bits,
+            b_bits,
         ]);
-        let (idx7, _) = positions.insert_full([
+        let (idx7, _) = vertices.insert_full([
             (x - 0.5).to_bits(),
             (y + 0.5).to_bits(),
             (z - 0.5).to_bits(),
+            r_bits,
+            g_bits,
+            b_bits,
         ]);
         indices.extend(
             [
@@ -140,32 +174,35 @@ fn main() {
         );
     }
 
-    let mut min_point = [f32::MAX; 3];
-    let mut max_point = [f32::MIN; 3];
+    let mut min_position = [f32::MAX; 3];
+    let mut max_position = [f32::MIN; 3];
     {
         let mut bin_file = BufWriter::new(File::create("output.bin").unwrap());
-        for pos in &positions {
-            min_point[0] = f32::min(min_point[0], f32::from_bits(pos[0]));
-            min_point[1] = f32::min(min_point[1], f32::from_bits(pos[1]));
-            min_point[2] = f32::min(min_point[2], f32::from_bits(pos[2]));
-            max_point[0] = f32::max(max_point[0], f32::from_bits(pos[0]));
-            max_point[1] = f32::max(max_point[1], f32::from_bits(pos[1]));
-            max_point[2] = f32::max(max_point[2], f32::from_bits(pos[2]));
-
-            bin_file.write_u32::<LittleEndian>(pos[0]).unwrap();
-            bin_file.write_u32::<LittleEndian>(pos[1]).unwrap();
-            bin_file.write_u32::<LittleEndian>(pos[2]).unwrap();
-        }
 
         for &idx in &indices {
             bin_file.write_u32::<LittleEndian>(idx).unwrap();
         }
+
+        for &[x, y, z, r, g, b] in &vertices {
+            min_position[0] = f32::min(min_position[0], f32::from_bits(x));
+            min_position[1] = f32::min(min_position[1], f32::from_bits(y));
+            min_position[2] = f32::min(min_position[2], f32::from_bits(z));
+            max_position[0] = f32::max(max_position[0], f32::from_bits(x));
+            max_position[1] = f32::max(max_position[1], f32::from_bits(y));
+            max_position[2] = f32::max(max_position[2], f32::from_bits(z));
+
+            bin_file.write_u32::<LittleEndian>(x).unwrap();
+            bin_file.write_u32::<LittleEndian>(y).unwrap();
+            bin_file.write_u32::<LittleEndian>(z).unwrap();
+            bin_file.write_u32::<LittleEndian>(r).unwrap();
+            bin_file.write_u32::<LittleEndian>(g).unwrap();
+            bin_file.write_u32::<LittleEndian>(b).unwrap();
+        }
     }
 
-    // number of voxels x number of vertex coordinates (3) x 4 bytes (f32)
-    let positions_size = positions.len() * 12;
     let indices_size = indices.len() * 4;
-    let total_size = positions_size + indices_size;
+    let vertices_size = vertices.len() * 6 * 4;
+    let total_size = indices_size + vertices_size;
 
     // make glTF
     let gltf_json = json!( {
@@ -185,8 +222,11 @@ fn main() {
             {
                 "primitives": [
                     {
-                        "attributes": {"POSITION": 0},
-                        "indices": 1,
+                        "attributes": {
+                            "POSITION": 1,
+                            "COLOR_0": 2,
+                        },
+                        "indices": 0,
                         "mode": 4, // TRIANGLES
                     },
                 ],
@@ -202,32 +242,40 @@ fn main() {
             {
                 "buffer": 0,
                 "byteOffset": 0,
-                "byteLength": positions_size,
-                "target": 34962,
+                "byteLength": indices_size,
+                "target": 34963, // ELEMENT_ARRAY_BUFFER
             },
             {
                 "buffer": 0,
-                "byteOffset": positions_size,
-                "byteLength": indices_size,
-                "target": 34963,
+                "byteStride": 6 * 4,
+                "byteOffset": indices_size,
+                "byteLength": vertices_size,
+                "target": 34962, // ARRAY_BUFFER
             },
         ],
         "accessors": [
             {
                 "bufferView": 0,
                 "byteOffset": 0,
-                "componentType": 5126, // FLOAT
-                "count": positions.len(),
-                "type": "VEC3",
-                "min": [min_point[0], min_point[1], min_point[2]],
-                "max": [max_point[0], max_point[1], max_point[2]],
+                "componentType": 5125, // UNSIGNED_INT
+                "count": indices.len(),
+                "type": "SCALAR",
             },
             {
                 "bufferView": 1,
                 "byteOffset": 0,
-                "componentType": 5125, // UNSIGNED_INT
-                "count": indices.len(),
-                "type": "SCALAR",
+                "componentType": 5126, // FLOAT
+                "count": vertices.len(),
+                "type": "VEC3",
+                "min": [min_position[0], min_position[1], min_position[2]],
+                "max": [max_position[0], max_position[1], max_position[2]],
+            },
+            {
+                "bufferView": 1,
+                "byteOffset": 4 * 3,
+                "componentType": 5126, // FLOAT
+                "count": vertices.len(),
+                "type": "VEC3",
             },
         ],
     });
