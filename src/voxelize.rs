@@ -159,30 +159,37 @@ fn fill_triangle<V: Clone>(
     }
     debug_assert!(ordered_verts[1][sweep_axis] >= ordered_verts[0][sweep_axis]);
 
-    let v0 = Vec3::from(ordered_verts[0]);
-    let v1 = Vec3::from(ordered_verts[1]);
-    let v2 = Vec3::from(ordered_verts[2]);
+    let p0 = Vec3::from(ordered_verts[0]);
+    let p1 = Vec3::from(ordered_verts[1]);
+    let p2 = Vec3::from(ordered_verts[2]);
+    let v01 = p1 - p0;
+    let v02 = p2 - p0;
+    let v12 = p2 - p1;
 
-    let end_step = (v2 - v0) / (ordered_verts[2][sweep_axis] - ordered_verts[0][sweep_axis]);
-    let mut end_pos = v0
-        + end_step * ((ordered_verts[0][sweep_axis] + 0.5).floor() - ordered_verts[0][sweep_axis]);
+    let end_step = v02 / (ordered_verts[2][sweep_axis] - ordered_verts[0][sweep_axis]);
+    let mut end_pos = p0
+        + end_step
+            * ((1.0 - ordered_verts[0][sweep_axis] + ordered_verts[0][sweep_axis].floor()) % 1.0);
 
-    let start_step1 = (v1 - v0) / (ordered_verts[1][sweep_axis] - ordered_verts[0][sweep_axis]);
-    let start_step2 = (Vec3::from(ordered_verts[2]) - Vec3::from(ordered_verts[1]))
-        / (ordered_verts[2][sweep_axis] - ordered_verts[1][sweep_axis]);
-    let mut start_pos = v0
-        + start_step1
-            * ((ordered_verts[0][sweep_axis] + 0.5).floor() - ordered_verts[0][sweep_axis]);
-
-    if start_step1.length() > 1000.0 || start_step2.length() > 1000.0 || end_step.length() > 1000.0
-    {
-        log::debug!("Step vector magnitude is too large");
-        return;
-    }
+    let start_step1 = v01 / (ordered_verts[1][sweep_axis] - ordered_verts[0][sweep_axis]);
+    let start_step2 = v12 / (ordered_verts[2][sweep_axis] - ordered_verts[1][sweep_axis]);
+    let to_next_line =
+        (1.0 - ordered_verts[0][sweep_axis] + ordered_verts[0][sweep_axis].floor()) % 1.0;
+    let mut start_pos = p0 + start_step1 * to_next_line;
 
     if start_step1[sweep_axis].is_finite() {
+        // underjet
+        if to_next_line > 0.5 {
+            let d = to_next_line - 0.5;
+            let mut s = (p0 + d * v01).to_array();
+            let mut e = (p0 + d * v02).to_array();
+            s[sweep_axis] -= 0.5;
+            e[sweep_axis] -= 0.5;
+            draw_line(voxels, Vec3::from_array(s), Vec3::from_array(e), shader);
+        };
+
         // Start position is on the first edge
-        while start_pos[sweep_axis] < ordered_verts[1][sweep_axis] + 0.5 {
+        while start_pos[sweep_axis] <= ordered_verts[1][sweep_axis] {
             draw_line(voxels, start_pos, end_pos, shader);
             start_pos += start_step1;
             end_pos += end_step;
@@ -195,15 +202,27 @@ fn fill_triangle<V: Clone>(
         // Switch to the second edge
         start_pos = Vec3::from(ordered_verts[1])
             + start_step2
-                * ((ordered_verts[0][sweep_axis] + 0.5).floor() - ordered_verts[0][sweep_axis]);
+                * ((1.0 - ordered_verts[1][sweep_axis] + ordered_verts[1][sweep_axis].floor())
+                    % 1.0);
     }
 
     if start_step2[sweep_axis].is_finite() {
         // Start position is on the second edge
-        while end_pos[sweep_axis] < ordered_verts[2][sweep_axis] + 0.5 {
+        while end_pos[sweep_axis] <= ordered_verts[2][sweep_axis] {
             draw_line(voxels, start_pos, end_pos, shader);
             start_pos += start_step2;
             end_pos += end_step;
+        }
+
+        // overjet
+        if end_pos[sweep_axis] - 0.5 < ordered_verts[2][sweep_axis]
+            && end_pos[sweep_axis] - 0.5 >= ordered_verts[1][sweep_axis]
+        {
+            start_pos -= start_step2 * 0.5;
+            end_pos -= end_step * 0.5;
+            start_pos[sweep_axis] += 0.5;
+            end_pos[sweep_axis] += 0.5;
+            draw_line(voxels, start_pos, end_pos, shader);
         }
     }
 }

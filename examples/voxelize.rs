@@ -72,7 +72,7 @@ fn main() {
                             let [x, y, z] = [x as f32, y as f32, z as f32];
                             let color_lab = palette::Okhsl::new(
                                 x.atan2(z).to_degrees(),
-                                1.0 - (x * x + z * z) / 2000.,
+                                1.0 - (x * x + z * z) / 2500.,
                                 y / 90. + 0.5,
                             );
                             let color_srgb = palette::Srgb::from_color(color_lab);
