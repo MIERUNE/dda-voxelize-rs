@@ -36,13 +36,12 @@ fn main() {
     mpoly.add_exterior([2, 3, 5]);
     mpoly.add_exterior([3, 0, 5]);
 
-    // triangulation
+    let mut voxelizer = DdaVoxelizer::new();
+
     let mut earcutter = Earcut::new();
     let mut buf3d: Vec<[f32; 3]> = Vec::new();
     let mut buf2d: Vec<[f32; 2]> = Vec::new();
     let mut index_buf: Vec<u32> = Vec::new();
-
-    let mut voxelizer = DdaVoxelizer::new();
 
     for idx_poly in mpoly.iter() {
         let poly = idx_poly.transform(|idx| vertices[*idx as usize]);
@@ -73,7 +72,7 @@ fn main() {
                             let [x, y, z] = [x as f32, y as f32, z as f32];
                             let color_lab = palette::Okhsl::new(
                                 x.atan2(z).to_degrees(),
-                                1.0 - (x * x + z * z) / 2200.,
+                                1.0 - (x * x + z * z) / 2000.,
                                 y / 90. + 0.5,
                             );
                             let color_srgb = palette::Srgb::from_color(color_lab);
@@ -85,19 +84,33 @@ fn main() {
         }
     }
 
-    voxelizer.add_triangle(
-        &[[40., 40., 40.], [40., 40.6, 40.], [40., 40., 40.6]],
-        &|_, [x, y, z], _| {
-            let [x, y, z] = [x as f32, y as f32, z as f32];
-            let color_lab = palette::Okhsl::new(
-                x.atan2(z).to_degrees(),
-                1.0 - (x * x + z * z) / 2200.,
-                y / 90. + 0.5,
-            );
-            let color_srgb = palette::Srgb::from_color(color_lab);
-            [color_srgb.red, color_srgb.green, color_srgb.blue]
-        },
-    );
+    // voxelizer.add_triangle(
+    //     &[[0., 40.4, 40.4], [0., 40.6, 40.5], [0., 40.4, 40.6]],
+    //     &|_, [x, y, z], _| {
+    //         let [x, y, z] = [x as f32, y as f32, z as f32];
+    //         let color_lab = palette::Okhsl::new(
+    //             x.atan2(z).to_degrees(),
+    //             1.0 - (x * x + z * z) / 2200.,
+    //             y / 90. + 0.5,
+    //         );
+    //         let color_srgb = palette::Srgb::from_color(color_lab);
+    //         [color_srgb.red, color_srgb.green, color_srgb.blue]
+    //     },
+    // );
+
+    // voxelizer.add_triangle(
+    //     &[[0., 30.6, 30.4], [0., 30.4, 30.5], [0., 30.6, 30.6]],
+    //     &|_, [x, y, z], _| {
+    //         let [x, y, z] = [x as f32, y as f32, z as f32];
+    //         let color_lab = palette::Okhsl::new(
+    //             x.atan2(z).to_degrees(),
+    //             1.0 - (x * x + z * z) / 2200.,
+    //             y / 90. + 0.5,
+    //         );
+    //         let color_srgb = palette::Srgb::from_color(color_lab);
+    //         [color_srgb.red, color_srgb.green, color_srgb.blue]
+    //     },
+    // );
 
     // voxelizer.add_line([40., 40., 40.], [40., 40., 40.], &|_, [x, y, z], _| {
     //     let [x, y, z] = [x as f32, y as f32, z as f32];

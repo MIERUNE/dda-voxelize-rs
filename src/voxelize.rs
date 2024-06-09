@@ -165,15 +165,14 @@ fn fill_triangle<V: Clone>(
 
     let end_step = (v2 - v0) / (ordered_verts[2][sweep_axis] - ordered_verts[0][sweep_axis]);
     let mut end_pos = v0
-        + end_step
-            * ((1.0 - ordered_verts[0][sweep_axis] + ordered_verts[0][sweep_axis].floor()) % 1.0);
+        + end_step * ((ordered_verts[0][sweep_axis] + 0.5).floor() - ordered_verts[0][sweep_axis]);
 
     let start_step1 = (v1 - v0) / (ordered_verts[1][sweep_axis] - ordered_verts[0][sweep_axis]);
     let start_step2 = (Vec3::from(ordered_verts[2]) - Vec3::from(ordered_verts[1]))
         / (ordered_verts[2][sweep_axis] - ordered_verts[1][sweep_axis]);
     let mut start_pos = v0
         + start_step1
-            * ((1.0 - ordered_verts[0][sweep_axis] + ordered_verts[0][sweep_axis].floor()) % 1.0);
+            * ((ordered_verts[0][sweep_axis] + 0.5).floor() - ordered_verts[0][sweep_axis]);
 
     if start_step1.length() > 1000.0 || start_step2.length() > 1000.0 || end_step.length() > 1000.0
     {
@@ -196,8 +195,7 @@ fn fill_triangle<V: Clone>(
         // Switch to the second edge
         start_pos = Vec3::from(ordered_verts[1])
             + start_step2
-                * ((1.0 - ordered_verts[1][sweep_axis] + ordered_verts[1][sweep_axis].floor())
-                    % 1.0);
+                * ((ordered_verts[0][sweep_axis] + 0.5).floor() - ordered_verts[0][sweep_axis]);
     }
 
     if start_step2[sweep_axis].is_finite() {
