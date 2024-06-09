@@ -69,9 +69,9 @@ fn draw_line<V: Clone>(
     shader: &impl Shader<V>,
 ) {
     let difference = end - start;
+    let mut current_voxel = (start + Vec3::splat(0.5)).floor().as_ivec3();
     let last_voxel = (end + Vec3::splat(0.5)).floor().as_ivec3();
 
-    let mut current_voxel = (start + Vec3::splat(0.5)).floor().as_ivec3();
     let step = difference.signum().as_ivec3();
     let next_voxel_boundary = current_voxel.as_vec3() + 0.5 * step.as_vec3();
     let mut tmax = (next_voxel_boundary - start) / difference;
@@ -107,29 +107,18 @@ fn fill_triangle<V: Clone>(
     triangle: &[[f32; 3]; 3],
     shader: &impl Shader<V>,
 ) {
-    let p1 = Vec3::from(triangle[0]);
-    let p2 = Vec3::from(triangle[1]);
-    let p3 = Vec3::from(triangle[2]);
+    let v0 = Vec3::from(triangle[0]);
+    let v1 = Vec3::from(triangle[1]);
+    let v2 = Vec3::from(triangle[2]);
 
-    // If the triangle is small enough, fill only the voxels corresponding to the three vertices.
-    if is_small_triangle(&p1, &p2, &p3) {
-        put_voxel(voxels, (p1 + Vec3::splat(0.5)).as_ivec3(), shader);
-        put_voxel(voxels, (p2 + Vec3::splat(0.5)).as_ivec3(), shader);
-        put_voxel(voxels, (p3 + Vec3::splat(0.5)).as_ivec3(), shader);
-        return;
-    }
-
-    let mut normal = (p2 - p1).cross(p3 - p1);
+    let mut normal = (v1 - v0).cross(v2 - v0);
     let normal_length = normal.length();
     if normal_length.is_nan() || normal_length == 0.0 {
+        // TODO: Should we draw a line when the triangle is colinear?
         return;
     }
     normal /= normal_length;
 
-    // Find the axis of maximum length
-    // yz plane if norm_axis is 0(x)
-    // zx plane if norm_axis is 1(y)
-    // xy plane if norm_axis is 2(z)
     let normal_axis = normal
         .abs()
         .to_array()
@@ -139,41 +128,25 @@ fn fill_triangle<V: Clone>(
         .map(|(i, _)| i)
         .unwrap();
 
-    let mut min_point = p1;
-    let mut max_point = p1;
-    for p in &[p2, p3] {
-        min_point = min_point.min(*p);
-        max_point = max_point.max(*p);
-    }
-    let box_size = max_point - min_point;
+    // Determine the axis to sweep along
+    let sweep_axis = {
+        let min_point = v0.min(v1).min(v2);
+        let max_point = v0.max(v1).max(v2);
+        let box_size = max_point - min_point;
 
-    let sweep_axis = match normal_axis {
-        0 => {
-            if box_size[1] >= box_size[2] {
-                1
-            } else {
-                2
-            }
+        // Which axis is the triangle's normal closer to?
+        match normal_axis {
+            0 if box_size[1] >= box_size[2] => 1,
+            0 => 2,
+            1 if box_size[2] >= box_size[0] => 2,
+            1 => 0,
+            2 if box_size[0] >= box_size[1] => 0,
+            2 => 1,
+            _ => unreachable!(),
         }
-        1 => {
-            if box_size[2] >= box_size[0] {
-                2
-            } else {
-                0
-            }
-        }
-        2 => {
-            if box_size[0] >= box_size[1] {
-                0
-            } else {
-                1
-            }
-        }
-        _ => unreachable!(),
     };
 
-    // Draw a virtual grid along the x-axis and find the intersection of the target triangle and the edge
-    // Paint from the intersection with smaller x to the intersection with larger x
+    // Reorder the vertices to arrange sequentially along the sweep axis
     let mut ordered_verts = [triangle[0], triangle[1], triangle[2]];
     if ordered_verts[0][sweep_axis] > ordered_verts[1][sweep_axis] {
         ordered_verts.swap(0, 1);
@@ -186,68 +159,55 @@ fn fill_triangle<V: Clone>(
     }
     debug_assert!(ordered_verts[1][sweep_axis] >= ordered_verts[0][sweep_axis]);
 
-    let ordered_verts: [[f32; 3]; 3] = ordered_verts.map(|inner| inner.map(|x| x));
+    let v0 = Vec3::from(ordered_verts[0]);
+    let v1 = Vec3::from(ordered_verts[1]);
+    let v2 = Vec3::from(ordered_verts[2]);
 
-    let [mut start_step, mut start_pos] =
-        if (ordered_verts[1][sweep_axis] - ordered_verts[0][sweep_axis]).abs() >= 0.0
-            && (ordered_verts[1][sweep_axis] - ordered_verts[0][sweep_axis].floor() >= 1.0)
-        {
-            let start_step = (Vec3::from(ordered_verts[1]) - Vec3::from(ordered_verts[0]))
-                / (ordered_verts[1][sweep_axis] - ordered_verts[0][sweep_axis]);
-            let start_pos = Vec3::from(ordered_verts[0])
-                + start_step
-                    * ((1.0 - ordered_verts[0][sweep_axis] + ordered_verts[0][sweep_axis].floor())
-                        % 1.0);
-            [start_step, start_pos]
-        } else {
-            let start_step = (Vec3::from(ordered_verts[2]) - Vec3::from(ordered_verts[1]))
-                / (ordered_verts[2][sweep_axis] - ordered_verts[1][sweep_axis]);
-            let start_pos = Vec3::from(ordered_verts[1])
-                + start_step
-                    * ((1.0 - ordered_verts[1][sweep_axis] + ordered_verts[1][sweep_axis].floor())
-                        % 1.0);
-            [start_step, start_pos]
-        };
-
-    let end_step = (Vec3::from(ordered_verts[2]) - Vec3::from(ordered_verts[0]))
-        / (ordered_verts[2][sweep_axis] - ordered_verts[0][sweep_axis]);
-    let mut end_pos = Vec3::from(ordered_verts[0])
+    let end_step = (v2 - v0) / (ordered_verts[2][sweep_axis] - ordered_verts[0][sweep_axis]);
+    let mut end_pos = v0
         + end_step
             * ((1.0 - ordered_verts[0][sweep_axis] + ordered_verts[0][sweep_axis].floor()) % 1.0);
 
-    let mut end_vertex_y = ordered_verts[1][sweep_axis];
+    let start_step1 = (v1 - v0) / (ordered_verts[1][sweep_axis] - ordered_verts[0][sweep_axis]);
+    let start_step2 = (Vec3::from(ordered_verts[2]) - Vec3::from(ordered_verts[1]))
+        / (ordered_verts[2][sweep_axis] - ordered_verts[1][sweep_axis]);
+    let mut start_pos = v0
+        + start_step1
+            * ((1.0 - ordered_verts[0][sweep_axis] + ordered_verts[0][sweep_axis].floor()) % 1.0);
 
-    if start_step.length() > 1000.0 || end_step.length() > 1000.0 {
-        log::debug!("Direction vector magnitude is too large");
+    if start_step1.length() > 1000.0 || start_step2.length() > 1000.0 || end_step.length() > 1000.0
+    {
+        log::debug!("Step vector magnitude is too large");
         return;
     }
 
-    while end_pos[sweep_axis] <= ordered_verts[2][sweep_axis] {
-        draw_line(voxels, start_pos, end_pos, shader);
+    if start_step1[sweep_axis].is_finite() {
+        // Start position is on the first edge
+        while start_pos[sweep_axis] < ordered_verts[1][sweep_axis] + 0.5 {
+            draw_line(voxels, start_pos, end_pos, shader);
+            start_pos += start_step1;
+            end_pos += end_step;
+        }
 
-        start_pos += start_step;
-        end_pos += end_step;
+        // Switch to the second edge
+        let end_vertex_y = ordered_verts[1][sweep_axis] - start_pos[sweep_axis];
+        start_pos += (start_step1 - start_step2) * end_vertex_y;
+    } else {
+        // Switch to the second edge
+        start_pos = Vec3::from(ordered_verts[1])
+            + start_step2
+                * ((1.0 - ordered_verts[1][sweep_axis] + ordered_verts[1][sweep_axis].floor())
+                    % 1.0);
+    }
 
-        if start_pos[sweep_axis] >= end_vertex_y {
-            end_vertex_y = start_pos[sweep_axis] - ordered_verts[1][sweep_axis];
-            start_pos -= start_step * end_vertex_y;
-            if (ordered_verts[2][sweep_axis] - ordered_verts[1][sweep_axis]).abs() == 0.0 {
-                continue;
-            }
-            start_step = (Vec3::from(ordered_verts[2]) - Vec3::from(ordered_verts[1]))
-                / (ordered_verts[2][sweep_axis] - ordered_verts[1][sweep_axis]);
-            start_pos += start_step * end_vertex_y;
-            end_vertex_y = ordered_verts[2][sweep_axis];
+    if start_step2[sweep_axis].is_finite() {
+        // Start position is on the second edge
+        while end_pos[sweep_axis] < ordered_verts[2][sweep_axis] + 0.5 {
+            draw_line(voxels, start_pos, end_pos, shader);
+            start_pos += start_step2;
+            end_pos += end_step;
         }
     }
-}
-
-fn is_small_triangle(p1: &Vec3, p2: &Vec3, p3: &Vec3) -> bool {
-    let d12 = p1.distance(*p2);
-    let d23 = p2.distance(*p3);
-    let d31 = p3.distance(*p1);
-
-    d12 <= 1.0 && d23 <= 1.0 && d31 <= 1.0
 }
 
 #[cfg(test)]
@@ -294,12 +254,12 @@ mod tests {
 
             if project3d_to_2d(&buf3d, num_outer, &mut buf2d) {
                 earcutter.earcut(buf2d.iter().cloned(), poly.hole_indices(), &mut index_buf);
-                for indx in index_buf.chunks_exact(3) {
+                for index in index_buf.chunks_exact(3) {
                     voxelizer.add_triangle(
                         &[
-                            buf3d[indx[0] as usize],
-                            buf3d[indx[1] as usize],
-                            buf3d[indx[2] as usize],
+                            buf3d[index[0] as usize],
+                            buf3d[index[1] as usize],
+                            buf3d[index[2] as usize],
                         ],
                         &|_, _, _| true,
                     );

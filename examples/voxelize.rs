@@ -62,17 +62,20 @@ fn main() {
             if project3d_to_2d(&buf3d, num_outer, &mut buf2d) {
                 // earcut
                 earcutter.earcut(buf2d.iter().cloned(), poly.hole_indices(), &mut index_buf);
-                for indx in index_buf.chunks_exact(3) {
+                for index in index_buf.chunks_exact(3) {
                     voxelizer.add_triangle(
                         &[
-                            buf3d[indx[0] as usize],
-                            buf3d[indx[1] as usize],
-                            buf3d[indx[2] as usize],
+                            buf3d[index[0] as usize],
+                            buf3d[index[1] as usize],
+                            buf3d[index[2] as usize],
                         ],
                         &|_current_value, [x, y, z], _vertex_weight| {
                             let [x, y, z] = [x as f32, y as f32, z as f32];
-                            let color_lab =
-                                palette::Okhsl::new(x.atan2(z).to_degrees(), 1.0, y / 90. + 0.5);
+                            let color_lab = palette::Okhsl::new(
+                                x.atan2(z).to_degrees(),
+                                1.0 - (x * x + z * z) / 2200.,
+                                y / 90. + 0.5,
+                            );
                             let color_srgb = palette::Srgb::from_color(color_lab);
                             [color_srgb.red, color_srgb.green, color_srgb.blue]
                         },
@@ -81,6 +84,31 @@ fn main() {
             }
         }
     }
+
+    voxelizer.add_triangle(
+        &[[40., 40., 40.], [40., 40.6, 40.], [40., 40., 40.6]],
+        &|_, [x, y, z], _| {
+            let [x, y, z] = [x as f32, y as f32, z as f32];
+            let color_lab = palette::Okhsl::new(
+                x.atan2(z).to_degrees(),
+                1.0 - (x * x + z * z) / 2200.,
+                y / 90. + 0.5,
+            );
+            let color_srgb = palette::Srgb::from_color(color_lab);
+            [color_srgb.red, color_srgb.green, color_srgb.blue]
+        },
+    );
+
+    // voxelizer.add_line([40., 40., 40.], [40., 40., 40.], &|_, [x, y, z], _| {
+    //     let [x, y, z] = [x as f32, y as f32, z as f32];
+    //     let color_lab = palette::Okhsl::new(
+    //         x.atan2(z).to_degrees(),
+    //         1.0 - (x * x + z * z) / 2200.,
+    //         y / 90. + 0.5,
+    //     );
+    //     let color_srgb = palette::Srgb::from_color(color_lab);
+    //     [color_srgb.red, color_srgb.green, color_srgb.blue]
+    // });
 
     let occupied_voxels = voxelizer.finalize();
 
