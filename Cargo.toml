@@ -1,6 +1,6 @@
 [package]
 name = "dda-voxelize"
-version = "0.1.0"
+version = "0.2.0-alpha.1"
 edition = "2021"
 description = "3D mesh voxelization with the DDA algorithm"
 authors = ["nokonoko1203 <nokonoko.1203.777@gmail.com>", "Taku Fukada <naninunenor@gmail.com>", "MIERUNE Inc. <info@mierune.co.jp>"]
@@ -9,7 +9,7 @@ repository = "https://github.com/MIERUNE/dda-voxelize-rs"
 categories = ["algorithms", "graphics", "mathematics", "science::geo"]
 
 [dependencies]
-glam = "0.27"
+glam = "0.28"
 hashbrown = "0.14"
 log = "0.4.21"
 
@@ -19,8 +19,4 @@ earcut = "0.4"
 byteorder = "1.5"
 serde_json = "1.0"
 indexmap = "2.2"
-
-[profile.release]
-lto = "fat"
-codegen-units = 1
-panic = "abort"
+palette = "0.7.6"
