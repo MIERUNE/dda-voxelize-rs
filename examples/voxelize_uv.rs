@@ -7,7 +7,6 @@ use byteorder::{LittleEndian, WriteBytesExt};
 use earcut::{utils3d::project3d_to_2d, Earcut};
 use flatgeom::MultiPolygon;
 use indexmap::IndexSet;
-use palette::FromColor;
 use serde_json::json;
 
 use dda_voxelize::DdaVoxelizer;
@@ -15,12 +14,11 @@ use dda_voxelize::DdaVoxelizer;
 fn main() {
     let vertices: Vec<[f64; 3]> = vec![
         // exterior
-        [26.5, 0.5, 0.5],
-        [0.5, 0.5, 26.5],
-        [-25.5, 0.5, 0.5],
-        [0.5, 0.5, -25.5],
-        [0.5, 55.5, 0.5],
-        [0.5, -54.5, 0.5],
+        [26.5, 26.5, 0.5],
+        [0.5, 26.5, 26.5],
+        [-25.5, 26.5, 0.5],
+        [0.5, 26.5, -25.5],
+        [0.5, 75.5, 0.5],
     ];
 
     let mut mpoly = MultiPolygon::<u32>::new();
@@ -31,10 +29,6 @@ fn main() {
     mpoly.add_exterior([1, 2, 4]);
     mpoly.add_exterior([2, 3, 4]);
     mpoly.add_exterior([3, 0, 4]);
-    mpoly.add_exterior([0, 1, 5]);
-    mpoly.add_exterior([1, 2, 5]);
-    mpoly.add_exterior([2, 3, 5]);
-    mpoly.add_exterior([3, 0, 5]);
 
     let mut voxelizer = DdaVoxelizer::new();
 
@@ -50,12 +44,15 @@ fn main() {
             None => poly.raw_coords().len(),
         };
 
-        for axis in 0..=2 {
+        for axis in 0..=5 {
             buf3d.clear();
             buf3d.extend(poly.raw_coords().iter().map(|v| match axis {
                 0 => [v[0] as f32, v[1] as f32, v[2] as f32],
                 1 => [v[1] as f32, v[0] as f32, v[2] as f32],
                 2 => [v[0] as f32, v[2] as f32, v[1] as f32],
+                3 => [v[0] as f32, -v[1] as f32, v[2] as f32],
+                4 => [-v[1] as f32, v[0] as f32, v[2] as f32],
+                5 => [v[0] as f32, v[2] as f32, -v[1] as f32],
                 _ => unreachable!(),
             }));
             if project3d_to_2d(&buf3d, num_outer, &mut buf2d) {
@@ -68,15 +65,11 @@ fn main() {
                             buf3d[index[1] as usize],
                             buf3d[index[2] as usize],
                         ],
-                        &|_current_value, [x, y, z], _vertex_weight| {
-                            let [x, y, z] = [x as f32, y as f32, z as f32];
-                            let color_lab = palette::Okhsl::new(
-                                x.atan2(z).to_degrees(),
-                                1.0 - (x * x + z * z) / 3050.,
-                                y / 110. + 0.5,
-                            );
-                            let color_srgb = palette::Srgb::from_color(color_lab);
-                            [color_srgb.red, color_srgb.green, color_srgb.blue]
+                        &|_current_value, _pos, [w0, w1, w2]| {
+                            // You could use the vertex weight to calculate the UV of the voxel.
+                            // uv = v0.uv * w0 + v1.uv * w1 + v2.uv * w2;
+
+                            [w0, w1, w2]
                         },
                     );
                 }

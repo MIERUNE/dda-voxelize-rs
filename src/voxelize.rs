@@ -35,6 +35,8 @@ impl<V: Clone> DdaVoxelizer<V> {
             &mut self.buffer,
             Vec3::from_array(start),
             Vec3::from_array(end),
+            Vec3::from_array([1., 0., 0.]),
+            Vec3::from_array([0., 1., 0.]),
             shader,
         )
     }
@@ -47,10 +49,18 @@ impl<V: Clone> DdaVoxelizer<V> {
 fn put_voxel<V: Clone>(
     buffer: &mut HashMap<[i32; 3], V>,
     position: glam::IVec3,
+    weight: glam::Vec3,
     shader: impl Shader<V>,
 ) {
     let position = position.to_array();
-    let weight = [1., 0., 0.]; // FIXME: not impletmented yet
+    let weight = {
+        let mut w = weight.to_array();
+        w[0] = w[0].clamp(0.0, 1.0);
+        w[1] = w[1].clamp(0.0, 1.0);
+        w[2] = w[2].clamp(0.0, 1.0);
+        w
+    };
+
     match buffer.entry(position) {
         Entry::Occupied(mut v) => {
             let v = v.get_mut();
@@ -66,6 +76,8 @@ fn draw_line<V: Clone>(
     buffer: &mut HashMap<VoxelPosition, V>,
     start: Vec3,
     end: Vec3,
+    start_w: Vec3,
+    end_w: Vec3,
     shader: &impl Shader<V>,
 ) {
     let difference = end - start;
@@ -77,29 +89,52 @@ fn draw_line<V: Clone>(
     let mut tmax = (next_voxel_boundary - start) / difference;
     let tdelta = step.as_vec3() / difference;
 
-    // TODO: We can optimize this since we actually need 2D DDA, not 3D DDA
+    let dir = difference.normalize();
+    let distance = difference.length();
+    let x_inv = dir.x.abs() / distance;
+    let y_inv = dir.y.abs() / distance;
+    let z_inv = dir.z.abs() / distance;
+    let mut t = 0.0;
 
-    while current_voxel != last_voxel {
-        put_voxel(buffer, current_voxel, shader);
+    // TODO: We could optimize this since we actually need 2D DDA, not 3D DDA
+
+    while current_voxel != last_voxel && t < 1.0 {
+        put_voxel(
+            buffer,
+            current_voxel,
+            start_w + t * (end_w - start_w),
+            shader,
+        );
 
         if tmax.x < tmax.y {
             if tmax.x < tmax.z {
                 current_voxel.x += step.x;
                 tmax.x += tdelta.x;
+                t += x_inv;
             } else {
                 current_voxel.z += step.z;
                 tmax.z += tdelta.z;
+                t += z_inv;
             }
         } else if tmax.y < tmax.z {
             current_voxel.y += step.y;
             tmax.y += tdelta.y;
+            t += y_inv;
         } else {
             current_voxel.z += step.z;
             tmax.z += tdelta.z;
+            t += z_inv;
         }
     }
 
-    put_voxel(buffer, current_voxel, shader);
+    if t <= 1.0 {
+        put_voxel(
+            buffer,
+            current_voxel,
+            start_w + t * (end_w - start_w),
+            shader,
+        );
+    }
 }
 
 fn fill_triangle<V: Clone>(
@@ -146,18 +181,27 @@ fn fill_triangle<V: Clone>(
         }
     };
 
-    // Reorder the vertices to arrange sequentially along the sweep axis
+    // Reorder the vertices to be arranged sequentially along the sweep axis
     let mut ordered_verts = [triangle[0], triangle[1], triangle[2]];
+    let mut vert_order = [0, 1, 2];
     if ordered_verts[0][sweep_axis] > ordered_verts[1][sweep_axis] {
         ordered_verts.swap(0, 1);
+        vert_order.swap(0, 1);
     }
     if ordered_verts[1][sweep_axis] > ordered_verts[2][sweep_axis] {
         ordered_verts.swap(1, 2);
+        vert_order.swap(1, 2);
     }
     if ordered_verts[0][sweep_axis] > ordered_verts[1][sweep_axis] {
         ordered_verts.swap(0, 1);
+        vert_order.swap(0, 1);
     }
     debug_assert!(ordered_verts[1][sweep_axis] >= ordered_verts[0][sweep_axis]);
+
+    let [mut w0, mut w1, mut w2] = [Vec3::ZERO, Vec3::ZERO, Vec3::ZERO];
+    w0[vert_order[0]] = 1.0;
+    w1[vert_order[1]] = 1.0;
+    w2[vert_order[2]] = 1.0;
 
     let p0 = Vec3::from(ordered_verts[0]);
     let p1 = Vec3::from(ordered_verts[1]);
@@ -170,12 +214,19 @@ fn fill_triangle<V: Clone>(
     let mut end_pos = p0
         + end_step
             * ((1.0 - ordered_verts[0][sweep_axis] + ordered_verts[0][sweep_axis].floor()) % 1.0);
+    let end_w_step = (w2 - w0) / (ordered_verts[2][sweep_axis] - ordered_verts[0][sweep_axis]);
+    let mut end_w = w0
+        + end_w_step
+            * ((1.0 - ordered_verts[0][sweep_axis] + ordered_verts[0][sweep_axis].floor()) % 1.0);
 
     let start_step1 = v01 / (ordered_verts[1][sweep_axis] - ordered_verts[0][sweep_axis]);
     let start_step2 = v12 / (ordered_verts[2][sweep_axis] - ordered_verts[1][sweep_axis]);
+    let start_w_step1 = (w1 - w0) / (ordered_verts[1][sweep_axis] - ordered_verts[0][sweep_axis]);
+    let start_w_step2 = (w2 - w1) / (ordered_verts[2][sweep_axis] - ordered_verts[1][sweep_axis]);
     let to_next_line =
         (1.0 - ordered_verts[0][sweep_axis] + ordered_verts[0][sweep_axis].floor()) % 1.0;
     let mut start_pos = p0 + start_step1 * to_next_line;
+    let mut start_w = w0 + start_w_step1 * to_next_line;
 
     if start_step1[sweep_axis].is_finite() {
         // underjet
@@ -185,23 +236,37 @@ fn fill_triangle<V: Clone>(
             let mut e = (p0 + d * v02).to_array();
             s[sweep_axis] -= 0.5;
             e[sweep_axis] -= 0.5;
-            draw_line(voxels, Vec3::from_array(s), Vec3::from_array(e), shader);
+            draw_line(
+                voxels,
+                Vec3::from_array(s),
+                Vec3::from_array(e),
+                w0 + d * (w1 - w0),
+                w0 + d * (w2 - w0),
+                shader,
+            );
         };
 
         // Start position is on the first edge
         while start_pos[sweep_axis] <= ordered_verts[1][sweep_axis] {
-            draw_line(voxels, start_pos, end_pos, shader);
+            draw_line(voxels, start_pos, end_pos, start_w, end_w, shader);
             start_pos += start_step1;
             end_pos += end_step;
+            start_w += start_w_step1;
+            end_w += end_w_step;
         }
 
         // Switch to the second edge
         let end_vertex_y = ordered_verts[1][sweep_axis] - start_pos[sweep_axis];
         start_pos += (start_step1 - start_step2) * end_vertex_y;
+        start_w += (start_w_step1 - start_w_step2) * end_vertex_y;
     } else {
         // Switch to the second edge
-        start_pos = Vec3::from(ordered_verts[1])
+        start_pos = p1
             + start_step2
+                * ((1.0 - ordered_verts[1][sweep_axis] + ordered_verts[1][sweep_axis].floor())
+                    % 1.0);
+        start_w = w1
+            + start_w_step2
                 * ((1.0 - ordered_verts[1][sweep_axis] + ordered_verts[1][sweep_axis].floor())
                     % 1.0);
     }
@@ -209,20 +274,26 @@ fn fill_triangle<V: Clone>(
     if start_step2[sweep_axis].is_finite() {
         // Start position is on the second edge
         while end_pos[sweep_axis] <= ordered_verts[2][sweep_axis] {
-            draw_line(voxels, start_pos, end_pos, shader);
+            draw_line(voxels, start_pos, end_pos, start_w, end_w, shader);
             start_pos += start_step2;
             end_pos += end_step;
+            start_w += start_w_step2;
+            end_w += end_w_step;
         }
 
         // overjet
         if end_pos[sweep_axis] - 0.5 < ordered_verts[2][sweep_axis]
-            && end_pos[sweep_axis] - 0.5 >= ordered_verts[1][sweep_axis]
+            && end_pos[sweep_axis] - 0.5 > ordered_verts[1][sweep_axis]
         {
             start_pos -= start_step2 * 0.5;
             end_pos -= end_step * 0.5;
+            start_w -= start_w_step2 * 0.5;
+            end_w -= end_w_step * 0.5;
+
             start_pos[sweep_axis] += 0.5;
             end_pos[sweep_axis] += 0.5;
-            draw_line(voxels, start_pos, end_pos, shader);
+
+            draw_line(voxels, start_pos, end_pos, start_w, end_w, shader);
         }
     }
 }
@@ -359,10 +430,10 @@ mod tests {
             [3.0, 0.0, 0.0],
             [3.0, 3.0, 0.0],
             [0.0, 3.0, 0.0],
-            [1.0, 1.0, 0.0],
-            [2.0, 1.0, 0.0],
-            [2.0, 2.0, 0.0],
-            [1.0, 2.0, 0.0],
+            [0.49, 0.49, 0.0],
+            [2.51, 0.49, 0.0],
+            [2.51, 2.51, 0.0],
+            [0.49, 2.51, 0.0],
         ];
 
         let mut mpoly = MultiPolygon::<u32>::new();
@@ -417,12 +488,8 @@ mod tests {
             [2, 0, 0],
             [3, 0, 0],
             [0, 1, 0],
-            [1, 1, 0],
-            [2, 1, 0],
             [3, 1, 0],
             [0, 2, 0],
-            [1, 2, 0],
-            [2, 2, 0],
             [3, 2, 0],
             [0, 3, 0],
             [1, 3, 0],
