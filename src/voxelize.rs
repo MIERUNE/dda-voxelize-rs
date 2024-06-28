@@ -98,7 +98,7 @@ fn draw_line<V: Clone>(
 
     // TODO: We could optimize this since we actually need 2D DDA, not 3D DDA
 
-    while current_voxel != last_voxel && t <= 1.0 {
+    while current_voxel != last_voxel && t < 1.0 {
         put_voxel(
             buffer,
             current_voxel,
@@ -283,7 +283,7 @@ fn fill_triangle<V: Clone>(
 
         // overjet
         if end_pos[sweep_axis] - 0.5 < ordered_verts[2][sweep_axis]
-            && end_pos[sweep_axis] - 0.5 >= ordered_verts[1][sweep_axis]
+            && end_pos[sweep_axis] - 0.5 > ordered_verts[1][sweep_axis]
         {
             start_pos -= start_step2 * 0.5;
             end_pos -= end_step * 0.5;
@@ -430,10 +430,10 @@ mod tests {
             [3.0, 0.0, 0.0],
             [3.0, 3.0, 0.0],
             [0.0, 3.0, 0.0],
-            [1.0, 1.0, 0.0],
-            [2.0, 1.0, 0.0],
-            [2.0, 2.0, 0.0],
-            [1.0, 2.0, 0.0],
+            [0.49, 0.49, 0.0],
+            [2.51, 0.49, 0.0],
+            [2.51, 2.51, 0.0],
+            [0.49, 2.51, 0.0],
         ];
 
         let mut mpoly = MultiPolygon::<u32>::new();
@@ -488,12 +488,8 @@ mod tests {
             [2, 0, 0],
             [3, 0, 0],
             [0, 1, 0],
-            [1, 1, 0],
-            [2, 1, 0],
             [3, 1, 0],
             [0, 2, 0],
-            [1, 2, 0],
-            [2, 2, 0],
             [3, 2, 0],
             [0, 3, 0],
             [1, 3, 0],
